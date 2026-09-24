@@ -1,0 +1,11 @@
+{
+  "name": "gide_network_viz",
+  "private": true,
+  "description": "Pre-computes the force layout for the GIDE metadata network (node layout.mjs)",
+  "scripts": {
+    "layout": "node layout.mjs"
+  },
+  "dependencies": {
+    "d3-force": "^3.0.0"
+  }
+}
