@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GIDE Metadata Network</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+  body { margin: 0; font: 13px system-ui, sans-serif; background: #fff; color: #222; overflow: hidden; }
+  canvas { display: block; }
+  #panel { position: absolute; top: 8px; left: 8px; background: rgba(255,255,255,.92); padding: 8px 10px; border-radius: 6px;
+           box-shadow: 0 1px 4px #0002; max-height: calc(100vh - 32px); overflow: auto; }
+  #panel label { display: block; white-space: nowrap; }
+  #panel h4 { margin: 8px 0 4px; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  #tip { position: absolute; pointer-events: none; background: #222; color: #fff; padding: 4px 6px; border-radius: 4px;
+         max-width: 360px; display: none; }
+  button { margin: 2px 2px 0 0; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel">
+  <h4>Classes</h4><label><input id="all" type="checkbox" checked> <b>All</b></label><div id="classes"></div>
+  <h4>Publishers</h4><div id="pubs"></div>
+  <h4>View</h4><button id="home" title="Also: press 0 or double-click empty space">Reset view</button>
+  <h4>Export</h4><button id="png">PNG (3×)</button><button id="svg">SVG</button>
+</div>
+<div id="tip"></div>
+<script>
+// Static viewer: positions come from positions.json (node layout.mjs); nothing here moves nodes.
+const LEGEND = [["Person", "#4e79a7"], ["Keyword", "#f28e2c"], ["Organization", "#59a14f"], ["Taxon", "#edc949"],
+  ["ScholarlyArticle", "#e15759"], ["Dataset", "#76b7b2"], ["Grant", "#af7aa1"], ["DefinedTerm", "#9c755f"]];
+const OTHERS = ["Others", "#bab0ab"];
+// logo colours, keyed by publisher IRI; unknown publishers fall back to grey
+const PUB_COLORS = { "https://idr.openmicroscopy.org/": "#d7261e", "https://ssbd.riken.jp/database": "#f39800",
+  "https://ssbd.riken.jp/repository": "#f39800", "https://www.ebi.ac.uk/bioimage-archive/": "#8cc63f" };
+const R_MIN = 1.5, R_MAX = 12, K = 8, INSIDE_X = 2, R_PUB = 36;
+const OUTSIDE_ALPHA = .35, EDGE_OUT_ALPHA = .04, EDGE_IN_ALPHA = .15;
+
+const canvas = document.getElementById("c"), ctx = canvas.getContext("2d"), dpr = devicePixelRatio || 1;
+let ext, W, H, transform = d3.zoomIdentity, data, polygon, hover = null, quad;
+const hidden = new Set(), colorOf = new Map(LEGEND);
+
+const group = n => colorOf.has(n.c) ? n.c : "Others";
+const visible = n => n.pub !== undefined || !hidden.has(group(n));
+const inside = n => n.pub === undefined && n.p.length !== 1;
+
+Promise.all([fetch("graph.json").then(r => r.json()), fetch("positions.json").then(r => r.json())]).then(([g, pos]) => {
+  data = g; polygon = pos.polygon;
+  for (const n of g.nodes) {
+    [n.x, n.y] = pos.pos[n.id];
+    n.in = inside(n); n.adj = [];
+    const base = R_MIN + (R_MAX - R_MIN) * Math.tanh(n.k / K);
+    n.r = n.pub !== undefined ? R_PUB : n.in ? INSIDE_X * base : base;
+    n.color = n.pub !== undefined ? (PUB_COLORS[n.u] || "#555") : (colorOf.get(n.c) || OTHERS[1]);
+  }
+  g.links = g.links.map(([s, t]) => {
+    const l = { s: g.nodes[s], t: g.nodes[t] };
+    l.in = l.s.in || l.t.in || l.s.pub !== undefined || l.t.pub !== undefined;
+    l.s.adj.push(l); l.t.adj.push(l);
+    return l;
+  });
+  const counts = d3.rollup(g.nodes.filter(n => n.pub === undefined), v => v.length, group);
+  document.getElementById("classes").innerHTML = [...LEGEND, OTHERS].map(([c, col]) =>
+    `<label><input type="checkbox" data-c="${c}" checked><span class="sw" style="background:${col}"></span>${c} (${counts.get(c) || 0})</label>`).join("");
+  document.getElementById("pubs").innerHTML = g.nodes.filter(n => n.pub !== undefined).sort((a, b) => a.pub - b.pub).map(n =>
+    `<label><span class="sw" style="background:${n.color}"></span>${n.l}</label>`).join("");
+  const boxes = [...document.querySelectorAll("#classes input")], all = document.getElementById("all");
+  const sync = () => {  // "All" is checked when every class is shown, half-checked when some are
+    hidden.clear(); for (const el of boxes) if (!el.checked) hidden.add(el.dataset.c);
+    all.checked = !hidden.size; all.indeterminate = hidden.size > 0 && hidden.size < boxes.length;
+    refresh();
+  };
+  boxes.forEach(el => el.onchange = sync);
+  all.onchange = () => { boxes.forEach(el => el.checked = all.checked); sync(); };
+  ext = d3.max(g.nodes, n => Math.max(Math.abs(n.x), Math.abs(n.y)));
+  d3.select(canvas).call(zoom.transform, defaultView());
+  refresh();
+});
+
+// only inside nodes and publishers are interactive
+function refresh() {
+  quad = d3.quadtree(data.nodes.filter(n => (n.in || n.pub !== undefined) && visible(n)), n => n.x, n => n.y);
+  draw();
+}
+
+// ---- drawing: batched by alpha/colour so 23k nodes stay cheap ----
+function batches() {
+  const nodes = data.nodes.filter(n => n.pub === undefined && visible(n));
+  const by = (arr) => d3.groups(arr, n => n.color);
+  return { out: by(nodes.filter(n => !n.in)), in: by(nodes.filter(n => n.in).sort((a, b) => a.r - b.r)),
+           pubs: data.nodes.filter(n => n.pub !== undefined),
+           links: d3.groups(data.links.filter(l => visible(l.s) && visible(l.t)), l => l.in) };
+}
+
+// publisher label: fixed on-screen size, placed outside the polygon (above top corners, below bottom ones),
+// extending away from the centre horizontally so neighbouring labels don't collide
+const LABEL_PX = 22;
+const labelColor = n => d3.color(n.color).darker(.7).formatHex();  // light logo colours need a darker text shade
+function labelPos(n, t) {
+  const fs = LABEL_PX / t.k, dy = n.r + fs * .9;
+  const side = Math.abs(n.x) < 1 ? 0 : Math.sign(n.x);  // corner on the vertical axis (odd N) stays centred
+  return [n.x + side * n.r, n.y + (n.y > 0 ? dy : -dy), fs, ["center", "left", "right"].at(side)];
+}
+
+function paint(c, t) {
+  const b = batches();
+  c.save(); c.fillStyle = "#fff"; c.fillRect(0, 0, c.canvas.width, c.canvas.height);
+  c.translate(t.x, t.y); c.scale(t.k, t.k);
+  c.strokeStyle = "#999"; c.lineWidth = 1.5 / t.k; c.setLineDash([8 / t.k, 6 / t.k]);
+  c.beginPath(); polygon.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); c.stroke();
+  c.setLineDash([]);
+  c.lineWidth = .6 / Math.sqrt(t.k);
+  for (const [isIn, ls] of b.links) {
+    c.strokeStyle = `rgba(110,110,110,${isIn ? EDGE_IN_ALPHA : EDGE_OUT_ALPHA})`;
+    c.beginPath(); for (const l of ls) { c.moveTo(l.s.x, l.s.y); c.lineTo(l.t.x, l.t.y); } c.stroke();
+  }
+  const fill = (groups, alpha) => {
+    c.globalAlpha = alpha;
+    for (const [col, ns] of groups) {
+      c.fillStyle = col; c.beginPath();
+      for (const n of ns) { c.moveTo(n.x + n.r, n.y); c.arc(n.x, n.y, n.r, 0, 2 * Math.PI); }
+      c.fill();
+    }
+    c.globalAlpha = 1;
+  };
+  fill(b.out, OUTSIDE_ALPHA);
+  fill(b.in, 1);
+  if (hover) {
+    c.strokeStyle = "rgba(20,20,20,.8)"; c.lineWidth = 1.2 / Math.sqrt(t.k); c.beginPath();
+    for (const l of hover.adj) if (visible(l.s) && visible(l.t)) { c.moveTo(l.s.x, l.s.y); c.lineTo(l.t.x, l.t.y); }
+    c.stroke();
+  }
+  c.textAlign = "center"; c.lineJoin = "round";
+  for (const n of b.pubs) {
+    c.fillStyle = n.color; c.strokeStyle = "#fff"; c.lineWidth = 3 / t.k;
+    c.beginPath(); c.arc(n.x, n.y, n.r, 0, 2 * Math.PI); c.fill(); c.stroke();
+    const [lx, ly, fs, align] = labelPos(n, t);
+    c.textAlign = align; c.font = `bold ${fs}px system-ui`; c.textBaseline = "middle";
+    c.strokeStyle = "#fff"; c.lineWidth = fs / 4; c.strokeText(n.l, lx, ly);  // white halo over edges/nodes
+    c.fillStyle = labelColor(n); c.fillText(n.l, lx, ly);
+  }
+  if (hover && hover.pub === undefined) {
+    c.strokeStyle = "#111"; c.lineWidth = 2 / t.k; c.beginPath(); c.arc(hover.x, hover.y, hover.r, 0, 2 * Math.PI); c.stroke();
+  }
+  c.restore();
+}
+function draw() {
+  if (!data) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); paint(ctx, transform);
+}
+function resize() {
+  W = innerWidth; H = innerHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr; canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  draw();
+}
+
+// ---- interaction (inside nodes + publishers only) ----
+const zoom = d3.zoom().scaleExtent([.05, 40]).on("zoom", e => { transform = e.transform; draw(); });
+// whole graph centred and fitted to the window
+const defaultView = () => d3.zoomIdentity.translate(innerWidth / 2, innerHeight / 2).scale(Math.min(innerWidth, innerHeight) / (2.1 * ext));
+const goHome = () => d3.select(canvas).transition().duration(600).call(zoom.transform, defaultView());
+document.getElementById("home").onclick = goHome;
+addEventListener("keydown", e => { if (e.key === "0" || e.key === "Home") goHome(); });
+function nodeAt(ev) {
+  if (!quad) return null;
+  const [x, y] = transform.invert(d3.pointer(ev, canvas));
+  const n = quad.find(x, y, R_PUB + 10 / transform.k);
+  return n && Math.hypot(n.x - x, n.y - y) < n.r + 4 / transform.k ? n : null;
+}
+d3.select(canvas).call(zoom).on("dblclick.zoom", null)
+  .on("mousemove", ev => {
+    const n = nodeAt(ev), tip = document.getElementById("tip");
+    if (n !== hover) { hover = n; draw(); }
+    if (!n) { tip.style.display = "none"; return; }
+    const pubs = n.p.map(i => data.nodes.find(m => m.pub === i).l).join(", ");
+    tip.innerHTML = `<b>${n.c}</b>: ${n.l.replace(/</g, "&lt;")}<br>links: ${n.k}${pubs ? "<br>found in: " + pubs : ""}`;
+    tip.style.display = "block"; tip.style.left = ev.clientX + 12 + "px"; tip.style.top = ev.clientY + 12 + "px";
+  })
+  .on("dblclick", ev => { const n = nodeAt(ev); n ? n.u && open(n.u) : goHome(); });
+
+// ---- export ----
+function download(href, name) { const a = document.createElement("a"); a.href = href; a.download = name; a.click(); }
+document.getElementById("png").onclick = () => {
+  const s = 3, off = document.createElement("canvas"); off.width = W * s; off.height = H * s;
+  const c = off.getContext("2d"); c.scale(s, s);
+  const h = hover; hover = null; paint(c, transform); hover = h;
+  download(off.toDataURL("image/png"), "gide_network.png");
+};
+document.getElementById("svg").onclick = () => {
+  const t = transform, f = v => v.toFixed(1), b = batches(), out = [];
+  out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="100%" height="100%" fill="#fff"/>`,
+    `<g transform="translate(${t.x},${t.y}) scale(${t.k})">`,
+    `<polygon points="${polygon.map(p => p.map(f).join(",")).join(" ")}" fill="none" stroke="#999" stroke-width="${1.5 / t.k}" stroke-dasharray="${8 / t.k} ${6 / t.k}"/>`);
+  for (const [isIn, ls] of b.links)
+    out.push(`<path fill="none" stroke="rgb(110,110,110)" stroke-opacity="${isIn ? EDGE_IN_ALPHA : EDGE_OUT_ALPHA}" stroke-width="${.6 / Math.sqrt(t.k)}" d="`,
+      ...ls.map(l => `M${f(l.s.x)} ${f(l.s.y)}L${f(l.t.x)} ${f(l.t.y)}`), `"/>`);
+  for (const [groups, alpha] of [[b.out, OUTSIDE_ALPHA], [b.in, 1]])
+    for (const [col, ns] of groups)
+      out.push(`<g fill="${col}" fill-opacity="${alpha}">`, ...ns.map(n => `<circle cx="${f(n.x)}" cy="${f(n.y)}" r="${f(n.r)}"/>`), `</g>`);
+  for (const n of b.pubs)
+    out.push(`<circle cx="${f(n.x)}" cy="${f(n.y)}" r="${n.r}" fill="${n.color}" stroke="#fff" stroke-width="${3 / t.k}"/>`,
+      ((lx, ly, fs, align) => `<text x="${f(lx)}" y="${f(ly)}" text-anchor="${{ center: "middle", left: "start", right: "end" }[align]}" dominant-baseline="middle" font-family="sans-serif" font-weight="bold" font-size="${f(fs)}" fill="${labelColor(n)}" stroke="#fff" stroke-width="${f(fs / 4)}" stroke-linejoin="round" paint-order="stroke">${n.l}</text>`)(...labelPos(n, t)));
+  out.push("</g></svg>");
+  download(URL.createObjectURL(new Blob(out, { type: "image/svg+xml" })), "gide_network.svg");
+};
+
+addEventListener("resize", resize); resize();
+</script>
+</body>
+</html>
