@@ -23,7 +23,10 @@
 <div id="panel">
   <h4>Classes</h4><label><input id="all" type="checkbox" checked> <b>All</b></label><div id="classes"></div>
   <h4>Publishers</h4><div id="pubs"></div>
-  <h4>View</h4><button id="home" title="Also: press 0 or double-click empty space">Reset view</button>
+  <h4>View</h4>
+  <label><input type="radio" name="view" value="all"> All publishers (4)</label>
+  <label><input type="radio" name="view" value="ssbd"> SSBD merged (3)</label>
+  <button id="home" title="Also: press 0 or double-click empty space">Reset view</button>
   <h4>Export</h4><button id="png">PNG (3×)</button><button id="svg">SVG</button>
 </div>
 <div id="tip"></div>
@@ -34,50 +37,63 @@ const LEGEND = [["Person", "#4e79a7"], ["Keyword", "#f28e2c"], ["Organization", 
 const OTHERS = ["Others", "#bab0ab"];
 // logo colours, keyed by publisher IRI; unknown publishers fall back to grey
 const PUB_COLORS = { "https://idr.openmicroscopy.org/": "#d7261e", "https://ssbd.riken.jp/database": "#f39800",
-  "https://ssbd.riken.jp/repository": "#f39800", "https://www.ebi.ac.uk/bioimage-archive/": "#8cc63f" };
+  "https://ssbd.riken.jp/repository": "#f39800", "https://ssbd.riken.jp/": "#f39800",
+  "https://www.ebi.ac.uk/bioimage-archive/": "#8cc63f" };
+// two pre-computed views (build_graph.py + layout.mjs), by file suffix; ?view=ssbd opens the second one
+const VIEWS = { all: "", ssbd: "_ssbd" };
 const R_MIN = 1.5, R_MAX = 12, K = 8, INSIDE_X = 2, R_PUB = 36;
 const OUTSIDE_ALPHA = .35, EDGE_OUT_ALPHA = .04, EDGE_IN_ALPHA = .15;
 
 const canvas = document.getElementById("c"), ctx = canvas.getContext("2d"), dpr = devicePixelRatio || 1;
-let ext, W, H, transform = d3.zoomIdentity, data, polygon, hover = null, quad;
+let view, ext, W, H, transform = d3.zoomIdentity, data, polygon, hover = null, quad;
 const hidden = new Set(), colorOf = new Map(LEGEND);
 
 const group = n => colorOf.has(n.c) ? n.c : "Others";
 const visible = n => n.pub !== undefined || !hidden.has(group(n));
 const inside = n => n.pub === undefined && n.p.length !== 1;
 
-Promise.all([fetch("graph.json").then(r => r.json()), fetch("positions.json").then(r => r.json())]).then(([g, pos]) => {
-  data = g; polygon = pos.polygon;
-  for (const n of g.nodes) {
-    [n.x, n.y] = pos.pos[n.id];
-    n.in = inside(n); n.adj = [];
-    const base = R_MIN + (R_MAX - R_MIN) * Math.tanh(n.k / K);
-    n.r = n.pub !== undefined ? R_PUB : n.in ? INSIDE_X * base : base;
-    n.color = n.pub !== undefined ? (PUB_COLORS[n.u] || "#555") : (colorOf.get(n.c) || OTHERS[1]);
-  }
-  g.links = g.links.map(([s, t]) => {
-    const l = { s: g.nodes[s], t: g.nodes[t] };
-    l.in = l.s.in || l.t.in || l.s.pub !== undefined || l.t.pub !== undefined;
-    l.s.adj.push(l); l.t.adj.push(l);
-    return l;
-  });
-  const counts = d3.rollup(g.nodes.filter(n => n.pub === undefined), v => v.length, group);
-  document.getElementById("classes").innerHTML = [...LEGEND, OTHERS].map(([c, col]) =>
-    `<label><input type="checkbox" data-c="${c}" checked><span class="sw" style="background:${col}"></span>${c} (${counts.get(c) || 0})</label>`).join("");
-  document.getElementById("pubs").innerHTML = g.nodes.filter(n => n.pub !== undefined).sort((a, b) => a.pub - b.pub).map(n =>
-    `<label><span class="sw" style="background:${n.color}"></span>${n.l}</label>`).join("");
-  const boxes = [...document.querySelectorAll("#classes input")], all = document.getElementById("all");
-  const sync = () => {  // "All" is checked when every class is shown, half-checked when some are
-    hidden.clear(); for (const el of boxes) if (!el.checked) hidden.add(el.dataset.c);
-    all.checked = !hidden.size; all.indeterminate = hidden.size > 0 && hidden.size < boxes.length;
+function load(v) {  // class toggles carry over between views
+  view = Object.hasOwn(VIEWS, v) ? v : "all"; hover = null;
+  document.querySelector(`input[name=view][value=${view}]`).checked = true;
+  const url = new URL(location); view === "all" ? url.searchParams.delete("view") : url.searchParams.set("view", view);
+  history.replaceState(null, "", url);
+  const f = VIEWS[view], want = view;
+  Promise.all([fetch(`graph${f}.json`).then(r => r.json()), fetch(`positions${f}.json`).then(r => r.json())]).then(([g, pos]) => {
+    if (view !== want) return;  // switched again while loading
+    data = g; polygon = pos.polygon;
+    for (const n of g.nodes) {
+      [n.x, n.y] = pos.pos[n.id];
+      n.in = inside(n); n.adj = [];
+      const base = R_MIN + (R_MAX - R_MIN) * Math.tanh(n.k / K);
+      n.r = n.pub !== undefined ? R_PUB : n.in ? INSIDE_X * base : base;
+      n.color = n.pub !== undefined ? (PUB_COLORS[n.u] || "#555") : (colorOf.get(n.c) || OTHERS[1]);
+    }
+    g.links = g.links.map(([s, t]) => {
+      const l = { s: g.nodes[s], t: g.nodes[t] };
+      l.in = l.s.in || l.t.in || l.s.pub !== undefined || l.t.pub !== undefined;
+      l.s.adj.push(l); l.t.adj.push(l);
+      return l;
+    });
+    const counts = d3.rollup(g.nodes.filter(n => n.pub === undefined), v => v.length, group);
+    document.getElementById("classes").innerHTML = [...LEGEND, OTHERS].map(([c, col]) =>
+      `<label><input type="checkbox" data-c="${c}"${hidden.has(c) ? "" : " checked"}><span class="sw" style="background:${col}"></span>${c} (${counts.get(c) || 0})</label>`).join("");
+    document.getElementById("pubs").innerHTML = g.nodes.filter(n => n.pub !== undefined).sort((a, b) => a.pub - b.pub).map(n =>
+      `<label><span class="sw" style="background:${n.color}"></span>${n.l}</label>`).join("");
+    boxes().forEach(el => el.onchange = sync);
+    ext = d3.max(g.nodes, n => Math.max(Math.abs(n.x), Math.abs(n.y)));
+    d3.select(canvas).call(zoom.transform, defaultView());
     refresh();
-  };
-  boxes.forEach(el => el.onchange = sync);
-  all.onchange = () => { boxes.forEach(el => el.checked = all.checked); sync(); };
-  ext = d3.max(g.nodes, n => Math.max(Math.abs(n.x), Math.abs(n.y)));
-  d3.select(canvas).call(zoom.transform, defaultView());
+  });
+}
+const boxes = () => [...document.querySelectorAll("#classes input")], all = document.getElementById("all");
+function sync() {  // "All" is checked when every class is shown, half-checked when some are
+  hidden.clear(); for (const el of boxes()) if (!el.checked) hidden.add(el.dataset.c);
+  all.checked = !hidden.size; all.indeterminate = hidden.size > 0 && hidden.size < boxes().length;
   refresh();
-});
+}
+all.onchange = () => { boxes().forEach(el => el.checked = all.checked); sync(); };
+document.querySelectorAll("input[name=view]").forEach(el => el.onchange = () => load(el.value));
+load(new URLSearchParams(location.search).get("view"));
 
 // only inside nodes and publishers are interactive
 function refresh() {
@@ -186,7 +202,7 @@ document.getElementById("png").onclick = () => {
   const s = 3, off = document.createElement("canvas"); off.width = W * s; off.height = H * s;
   const c = off.getContext("2d"); c.scale(s, s);
   const h = hover; hover = null; paint(c, transform); hover = h;
-  download(off.toDataURL("image/png"), "gide_network.png");
+  download(off.toDataURL("image/png"), `gide_network_${view}.png`);
 };
 document.getElementById("svg").onclick = () => {
   const t = transform, f = v => v.toFixed(1), b = batches(), out = [];
@@ -203,7 +219,7 @@ document.getElementById("svg").onclick = () => {
     out.push(`<circle cx="${f(n.x)}" cy="${f(n.y)}" r="${n.r}" fill="${n.color}" stroke="#fff" stroke-width="${3 / t.k}"/>`,
       ((lx, ly, fs, align) => `<text x="${f(lx)}" y="${f(ly)}" text-anchor="${{ center: "middle", left: "start", right: "end" }[align]}" dominant-baseline="middle" font-family="sans-serif" font-weight="bold" font-size="${f(fs)}" fill="${labelColor(n)}" stroke="#fff" stroke-width="${f(fs / 4)}" stroke-linejoin="round" paint-order="stroke">${n.l}</text>`)(...labelPos(n, t)));
   out.push("</g></svg>");
-  download(URL.createObjectURL(new Blob(out, { type: "image/svg+xml" })), "gide_network.svg");
+  download(URL.createObjectURL(new Blob(out, { type: "image/svg+xml" })), `gide_network_${view}.svg`);
 };
 
 addEventListener("resize", resize); resize();
