@@ -5,11 +5,15 @@ github.com/foundingGIDE/gide-data-deliverable). Publisher nodes are pinned to th
 corners of a regular N-gon; everything else is force-laid-out once, offline. The viewer is
 static (positions never change in the browser). Built for a presentation.
 
+Two views, switched in the panel (or `?view=ssbd`): all 4 publishers as they are in the data (square),
+and SSBD database + SSBD repository merged into one SSBD publisher (triangle). Each view has its own
+generated files: no suffix for the first, `_ssbd` for the second.
+
 ## Run
 
 ```sh
-python3 build_graph.py          # TTL -> graph.json + class_counts.csv (needs rdflib)
-npm install && node layout.mjs  # graph.json -> positions.json (d3-force, ~3 min)
+python3 build_graph.py          # TTL -> graph{,_ssbd}.json + class_counts{,_ssbd}.csv (needs rdflib)
+npm install && node layout.mjs  # graph*.json -> positions*.json (d3-force, ~3 min per view; `node layout.mjs _ssbd` for one)
 python3 -m http.server          # then open http://localhost:8000
 ```
 
@@ -18,7 +22,7 @@ python3 -m http.server          # then open http://localhost:8000
 - `build_graph.py`: RDF → graph + per-class counts. Change it to change *what* is in the graph.
 - `layout.mjs`: the force layout, run once. Change it to change *where* nodes go.
 - `index.html`: static d3 v7 canvas viewer. Change it to change *how* the graph looks.
-- `graph.json`, `positions.json`, `class_counts.csv`: generated files. Don't edit them by hand.
+- `graph*.json`, `positions*.json`, `class_counts*.csv`: generated files, one set per view. Don't edit them by hand.
 
 ## Parameters
 
@@ -29,6 +33,7 @@ parameters:
   # --- data: what becomes the graph (build_graph.py) ---
   input_ttl: gide_metadata_combined.ttl
   anchor_predicate: schema:publisher        # its objects are the polygon corners
+  views: {"": all publishers (4), _ssbd: ssbd.riken.jp/database + /repository -> one node https://ssbd.riken.jp/ "SSBD" (3)}  # merge_ssbd()
   node_rule: every IRI / blank node         # literals are only used as labels...
   literal_nodes: [schema:keywords]          # ...except these, which become nodes
   keyword_normalization: strip + lowercase  # merges case variants
@@ -67,13 +72,14 @@ parameters:
   publisher_radius: 36                      # R_PUB (independent of INSIDE_X)
   legend_classes: [Person, Keyword, Organization, Taxon, ScholarlyArticle, Dataset, Grant, DefinedTerm]  # LEGEND
   others_colour: "#bab0ab"                  # every other class, one checkbox
-  publisher_colours: {IDR: "#d7261e" red, SSBD database + repository: "#f39800" orange, BIA: "#8cc63f" light green}  # logo colours, keyed by IRI; labels use a darker shade
+  publisher_colours: {IDR: "#d7261e" red, SSBD database + repository + merged: "#f39800" orange, BIA: "#8cc63f" light green}  # logo colours, keyed by IRI; labels use a darker shade
   outside_alpha: 0.35                       # OUTSIDE_ALPHA
   edge_alpha: {outside-outside: 0.04, touching inside/publisher: 0.15}
   polygon_outline: dashed grey
   publisher_labels: bold, publisher colour, white halo, 22px on screen at any zoom (LABEL_PX); above top corners, below bottom ones, extending outward
   draw_order: edges, outside nodes, inside nodes (small to large), hover edges, publishers
-  panel: [Classes, Publishers, View, Export]  # nothing else
+  panel: [Classes, Publishers, View, Export]  # nothing else; View holds the view switch + Reset view
+  view_switch: radio, reloads that view's files, keeps class toggles, sets ?view= in the URL
   default_view: whole graph centred and fitted to the window; back via "Reset view", key 0/Home, or double-click empty space
   class_toggle: hide/show only, never re-lays out; "All" checkbox shows/hides every class (half-checked when mixed)
   interactive: inside nodes + publishers only (hover tooltip + edge highlight, double-click opens IRI); zoom/pan everywhere
@@ -88,4 +94,4 @@ parameters:
 
 - BIA uses the misspelled class `QuantitiveValue` (in its own namespace). The other publishers use `schema:QuantitativeValue`.
 - No LabProtocol or BioSample is shared across publishers, because each one has a local UUID. The only links between publishers are keywords, DefinedTerm, articles, orgs, taxa and ORCID people.
-- The layout takes about 3 min (the polygon constraint runs for 23k nodes x 400 ticks). Rerun it only when graph.json or layout parameters change.
+- The layout takes about 3 min per view (the polygon constraint runs for 23k nodes x 400 ticks). Rerun it only when graph.json or layout parameters change.
