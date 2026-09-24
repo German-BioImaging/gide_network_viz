@@ -29,8 +29,9 @@
 <div id="tip"></div>
 <script>
 // Static viewer: positions come from positions.json (node layout.mjs); nothing here moves nodes.
-const LEGEND = [["Person", "#4e79a7"], ["Keyword", "#f28e2c"], ["Organization", "#59a14f"], ["Taxon", "#edc949"],
-  ["ScholarlyArticle", "#e15759"], ["Dataset", "#76b7b2"], ["Grant", "#af7aa1"], ["DefinedTerm", "#9c755f"]];
+// avoid the publisher logo hues (red, orange, light green) so classes aren't mistaken for publishers
+const LEGEND = [["Person", "#4e79a7"], ["Keyword", "#6a3d9a"], ["Organization", "#333333"], ["Taxon", "#edc949"],
+  ["ScholarlyArticle", "#e377c2"], ["Dataset", "#76b7b2"], ["Grant", "#af7aa1"], ["DefinedTerm", "#9c755f"]];
 const OTHERS = ["Others", "#bab0ab"];
 // logo colours, keyed by publisher IRI; unknown publishers fall back to grey
 const PUB_COLORS = { "https://idr.openmicroscopy.org/": "#d7261e", "https://ssbd.riken.jp/database": "#f39800",
