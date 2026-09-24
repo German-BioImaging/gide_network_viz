@@ -1,0 +1,17 @@
+class,Image Data Resource,SSBD:database,SSBD:repository,BioImage Archive,shared (>=2 publishers),total
+Person,215,1169,460,3197,22,5019
+Keyword,0,582,1835,2289,369,4305
+LabProtocol,1081,443,417,1188,0,3129
+BioSample,222,420,261,1765,0,2668
+Organization,24,317,91,1335,43,1720
+QuantitiveValue,0,0,0,1608,0,1608
+Dataset,143,264,373,804,0,1584
+QuantitativeValue,134,528,746,0,0,1408
+ScholarlyArticle,123,261,385,41,166,644
+DefinedTerm,44,317,402,39,238,533
+CreativeWork,143,15,373,1,0,532
+Taxon,84,76,28,117,36,254
+Grant,0,42,26,0,0,68
+CLO,0,5,8,0,2,11
+ro-crate,1,1,1,1,1,1
+ALL ENTITIES,2214,4439,5406,12385,877,23483
