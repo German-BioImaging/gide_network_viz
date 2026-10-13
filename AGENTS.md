@@ -22,7 +22,7 @@ python3 -m http.server          # then open http://localhost:8000
 - `build_graph.py`: RDF → graph + per-class counts. Change it to change *what* is in the graph.
 - `layout.mjs`: the force layout, run once. Change it to change *where* nodes go.
 - `index.html`: static d3 v7 canvas viewer. Change it to change *how* the graph looks.
-- `calendar.html`: one print image (A3 landscape, 300 dpi, dark) of the SSBD-merged view with a few labelled nodes; "Download PNG" saves it.
+- `calendar.html`: one print image (A3 landscape, 300 dpi, light beige) of the SSBD-merged view with a few labelled nodes; click any node to add/remove its label, "Download PNG" saves what is shown.
 - `graph*.json`, `positions*.json`, `class_counts*.csv`: generated files, one set per view. Don't edit them by hand.
 
 ## Parameters
@@ -91,20 +91,20 @@ parameters:
   calendar:
     view: _ssbd                             # triangle
     size_px: [4961, 3508]                   # A3 landscape, 300 dpi; MARGIN 160, bottom STRIP 300 for title + legend
-    background: "#0c1220" + dim radial vignette
-    palette: tints for dark background, blended 20% toward grey-blue (MUTE); publishers in logo colours
-    edges: additive ("lighter") blending, alpha 0.016 outside / 0.04 inside
-    outside_nodes: alpha 0.4
-    inside_nodes: soft glow (shadowBlur 0.6 x radius); publisher halo alpha 0.3
+    background: "#f3ede2" light beige, flat; text in dark ink "#2b2620" (dark version: tag 0.0.2)
+    palette: desaturated mid tones for beige, Taxon gold "#c9a227" vs DefinedTerm indigo "#2e4a8c"; publishers in logo colours, titles a darker shade
+    edges: warm dark grey, normal blending, alpha 0.035 outside / 0.08 inside
+    outside_nodes: alpha 0.45
+    inside_nodes: opaque with thin beige outline; no glow anywhere
     node_scale: 1.4                         # NODE_SCALE: radii enlarged for print
-    highlights:                             # HIGHLIGHTS: callout pill + white ring + edges in its colour
+    highlights:                             # HIGHLIGHTS: callout pill (CLASS · CURIE, e.g. NCBITaxon:9606; keywords have none) + ring and leader line in its class colour + its edges; click nodes/boxes to toggle
       - top 2 Taxon by links
       - top 2 DefinedTerm by links
-      - Person "Maddy Parsons"
-      - Keyword "brain"
-      - Keyword "mitochondria"
+      - Keyword "zebrafish"
+      - Keyword "morphogenesis"
     callout_slots: ellipse around the graph at [-155, -118, 175, 90, 5, -62, -25] deg; matched to nodes in cyclic order, shortest leaders
     title: "One network of bioimage metadata"
+    subtitle: "Metadata nodes in the FoundingGIDE project · <n> entities · <n> links · inside the triangle: shared by two or more repositories"
 
   # --- output ---
   export_png_scale: 3
