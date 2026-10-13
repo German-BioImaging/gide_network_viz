@@ -13,7 +13,7 @@ generated files: no suffix for the first, `_ssbd` for the second.
 
 ```sh
 python3 build_graph.py          # TTL -> graph{,_ssbd}.json + class_counts{,_ssbd}.csv (needs rdflib)
-npm install && node layout.mjs  # graph*.json -> positions*.json (d3-force, ~3 min per view; `node layout.mjs _ssbd` for one)
+npm install && node layout.mjs  # graph*.json -> positions*.json (d3-force, ~1 min per view; `node layout.mjs _ssbd` for one)
 python3 -m http.server          # then open http://localhost:8000
 ```
 
@@ -91,17 +91,19 @@ parameters:
   calendar:
     view: _ssbd                             # triangle
     size_px: [4961, 3508]                   # A3 landscape, 300 dpi; MARGIN 160, bottom STRIP 300 for title + legend
-    background: "#070b14" + radial vignette
-    palette: brighter tints for dark background (LEGEND in calendar.html); publishers in logo colours
-    edges: additive ("lighter") blending, alpha 0.025 outside / 0.06 inside
-    outside_nodes: alpha 0.5
-    inside_nodes: glow (shadowBlur 1.5 x radius)
-    node_scale: 2.2                         # NODE_SCALE: radii enlarged for print
+    background: "#0c1220" + dim radial vignette
+    palette: tints for dark background, blended 20% toward grey-blue (MUTE); publishers in logo colours
+    edges: additive ("lighter") blending, alpha 0.016 outside / 0.04 inside
+    outside_nodes: alpha 0.4
+    inside_nodes: soft glow (shadowBlur 0.6 x radius); publisher halo alpha 0.3
+    node_scale: 1.4                         # NODE_SCALE: radii enlarged for print
     highlights:                             # HIGHLIGHTS: callout pill + white ring + edges in its colour
       - top 2 Taxon by links
       - top 2 DefinedTerm by links
       - Person "Maddy Parsons"
       - Keyword "brain"
+      - Keyword "mitochondria"
+    callout_slots: ellipse around the graph at [-155, -118, 175, 90, 5, -62, -25] deg; matched to nodes in cyclic order, shortest leaders
     title: "One network of bioimage metadata"
 
   # --- output ---
@@ -114,4 +116,4 @@ parameters:
 
 - BIA uses the misspelled class `QuantitiveValue` (in its own namespace). The other publishers use `schema:QuantitativeValue`.
 - No LabProtocol or BioSample is shared across publishers, because each one has a local UUID. The only links between publishers are keywords, DefinedTerm, articles, orgs, taxa and ORCID people.
-- The layout takes about 3 min per view (the polygon constraint runs for 23k nodes x 400 ticks). Rerun it only when graph.json or layout parameters change.
+- The layout takes about 1 min per view (the polygon constraint runs for 23k nodes x 400 ticks). Rerun it only when graph.json or layout parameters change.

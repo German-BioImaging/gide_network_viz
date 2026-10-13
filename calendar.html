@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 <style>
-  body { margin: 0; background: #070b14; display: grid; place-items: center; min-height: 100vh; }
+  body { margin: 0; background: #0c1220; display: grid; place-items: center; min-height: 100vh; }
   canvas { width: min(100vw, calc(100vh * 4961 / 3508)); height: auto; display: block; }
   button { position: fixed; top: 10px; right: 10px; font: 600 13px Inter, system-ui, sans-serif; padding: 6px 10px;
            background: #1b2436; color: #e8edf7; border: 1px solid #34405a; border-radius: 6px; cursor: pointer; }
@@ -21,11 +21,13 @@
 // Single print image (A3 landscape, 300 dpi) of the SSBD-merged view: dark background, glow, a few labelled nodes.
 // Positions are the same pre-computed ones the viewer uses (graph_ssbd.json + positions_ssbd.json).
 const W = 4961, H = 3508, MARGIN = 160, STRIP = 300;  // px; STRIP = title/legend band at the bottom
-const BG = "#070b14";
+const BG = "#0c1220";
 const FONT = "Inter, system-ui, sans-serif";
 // brighter tints of the viewer's classes, chosen for a dark background and away from the logo hues
+const MUTE = .2;  // blend of each class tint toward a neutral grey-blue, so the print is less "neon"
 const LEGEND = [["Person", "#7aa6ff"], ["Keyword", "#c39bff"], ["Organization", "#9fb3c8"], ["Taxon", "#ffe066"],
-  ["ScholarlyArticle", "#ff8fd8"], ["Dataset", "#6ee7d8"], ["Grant", "#b4a7d6"], ["DefinedTerm", "#ffd6a5"]];
+  ["ScholarlyArticle", "#ff8fd8"], ["Dataset", "#6ee7d8"], ["Grant", "#b4a7d6"], ["DefinedTerm", "#ffd6a5"]]
+  .map(([k, col]) => [k, d3.color(d3.interpolateRgb(col, "#8a93a6")(MUTE)).formatHex()]);
 const OTHERS = "#5c6676";
 const PUB_COLORS = { "https://idr.openmicroscopy.org/": "#ff3b30", "https://ssbd.riken.jp/": "#ffa31a",
   "https://www.ebi.ac.uk/bioimage-archive/": "#9be15d" };
@@ -35,6 +37,7 @@ const HIGHLIGHTS = [
   { top: 2, c: "DefinedTerm" },
   { label: "Maddy Parsons", c: "Person" },
   { label: "brain", c: "Keyword" },
+  { label: "mitochondria", c: "Keyword" },
 ];
 const R_MIN = 1.5, R_MAX = 12, K = 8, INSIDE_X = 2, R_PUB = 36;  // same as the viewer (graph units)
 const NODE_SCALE = 1.4;  // print enlargement of node radii, so the smallest dots still show on paper
@@ -65,12 +68,12 @@ function draw(g, pos) {
   // background + vignette
   c.fillStyle = BG; c.fillRect(0, 0, W, H);
   const vg = c.createRadialGradient(W / 2, (H - STRIP) / 2, 0, W / 2, (H - STRIP) / 2, W * .6);
-  vg.addColorStop(0, "#14203a"); vg.addColorStop(1, "rgba(7,11,20,0)");
+  vg.addColorStop(0, "#111a2c"); vg.addColorStop(1, "rgba(12,18,32,0)");
   c.fillStyle = vg; c.fillRect(0, 0, W, H);
 
   // edges: additive blending makes dense bundles glow
   c.globalCompositeOperation = "lighter"; c.lineWidth = 1.1;
-  for (const [inner, alpha] of [[false, .025], [true, .06]]) {
+  for (const [inner, alpha] of [[false, .016], [true, .04]]) {
     c.strokeStyle = `rgba(150,180,255,${alpha})`; c.beginPath();
     for (const [a, b] of links) {
       const isIn = a.in || b.in || a.pub !== undefined || b.pub !== undefined;
@@ -90,13 +93,13 @@ function draw(g, pos) {
   const pickedSet = new Set(picked);
   c.lineWidth = 2;
   for (const p of picked) {
-    c.strokeStyle = hexA(p.color, .22); c.beginPath();
+    c.strokeStyle = hexA(p.color, .18); c.beginPath();
     for (const [a, b] of links) if (a === p || b === p) { c.moveTo(X(a), Y(a)); c.lineTo(X(b), Y(b)); }
     c.stroke();
   }
 
   // outside nodes: faint, batched by colour
-  c.globalAlpha = .5;
+  c.globalAlpha = .4;
   for (const [col, ns] of d3.groups(nodes.filter(n => n.pub === undefined && !n.in), n => n.color)) {
     c.fillStyle = col; c.beginPath();
     for (const n of ns) { c.moveTo(X(n) + R(n), Y(n)); c.arc(X(n), Y(n), R(n), 0, 2 * Math.PI); }
@@ -111,7 +114,7 @@ function draw(g, pos) {
 
   // inside (shared) nodes: glowing
   for (const n of nodes.filter(n => n.in).sort((a, b) => a.r - b.r)) {
-    c.shadowColor = n.color; c.shadowBlur = R(n) * 1.5; c.fillStyle = n.color;
+    c.shadowColor = n.color; c.shadowBlur = R(n) * .6; c.fillStyle = n.color;
     c.beginPath(); c.arc(X(n), Y(n), R(n), 0, 2 * Math.PI); c.fill();
   }
   c.shadowBlur = 0;
@@ -120,9 +123,9 @@ function draw(g, pos) {
   const pubs = nodes.filter(n => n.pub !== undefined);
   for (const n of pubs) {
     const r = R_PUB * s * NODE_SCALE * 1.2;
-    const glow = c.createRadialGradient(X(n), Y(n), 0, X(n), Y(n), r * 4);
-    glow.addColorStop(0, hexA(n.color, .55)); glow.addColorStop(1, hexA(n.color, 0));
-    c.fillStyle = glow; c.beginPath(); c.arc(X(n), Y(n), r * 4, 0, 2 * Math.PI); c.fill();
+    const glow = c.createRadialGradient(X(n), Y(n), 0, X(n), Y(n), r * 3);
+    glow.addColorStop(0, hexA(n.color, .3)); glow.addColorStop(1, hexA(n.color, 0));
+    c.fillStyle = glow; c.beginPath(); c.arc(X(n), Y(n), r * 3, 0, 2 * Math.PI); c.fill();
     c.fillStyle = n.color; c.strokeStyle = "#fff"; c.lineWidth = 6;
     c.beginPath(); c.arc(X(n), Y(n), r, 0, 2 * Math.PI); c.fill(); c.stroke();
     // title outside the polygon: above top corners, below bottom ones
@@ -133,30 +136,35 @@ function draw(g, pos) {
     c.strokeText(n.l, X(n), ty); c.fillText(n.l, X(n), ty);
   }
 
-  // callouts: two stacked columns in the empty top corners, left/right by the node's side; leader lines to the rings
-  const BOX_H = 140, GAP = 40, COL_X = .30;  // COL_X: column inner edge, as a fraction of the width from each side
+  // callouts on slots around an ellipse; slots skip straight up (IDR title) and the bottom corners (BIA/SSBD titles)
+  const SLOTS = [-155, -118, 175, 90, 5, -62, -25].map(d => d * Math.PI / 180);
+  const BOX_H = 140, ecx = W / 2, ecy = (H - STRIP) / 2, erx = .42 * W, ery = .42 * (H - STRIP);
   for (const p of picked) { c.strokeStyle = "#fff"; c.lineWidth = 5; c.beginPath(); c.arc(X(p), Y(p), R(p) + 8, 0, 2 * Math.PI); c.stroke(); }
-  for (const left of [true, false]) {
-    const byX = [...picked].sort((a, b) => X(a) - X(b)), half = Math.ceil(byX.length / 2);  // balance the two columns
-    const side = (left ? byX.slice(0, half) : byX.slice(half)).sort((a, b) => Y(a) - Y(b));
-    side.forEach((p, i) => {
-      const title = p.c.replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase(), text = p.l;
-      c.font = `800 64px ${FONT}`; const tw = c.measureText(text).width;
-      c.font = `600 30px ${FONT}`; const sw = c.measureText(title).width;
-      const bw = Math.max(tw, sw) + 70, bh = BOX_H;
-      const bx = left ? W * COL_X - bw : W * (1 - COL_X), by = MARGIN + i * (bh + GAP);
-      const ax = left ? bx + bw : bx, ay = by + bh / 2;  // anchor on the inner edge
-      const ang = Math.atan2(ay - Y(p), ax - X(p)), rr = R(p) + 8;
-      c.strokeStyle = hexA(p.color, .85); c.lineWidth = 4;
-      c.beginPath(); c.moveTo(X(p) + Math.cos(ang) * rr, Y(p) + Math.sin(ang) * rr);
-      c.lineTo(ax + (left ? 40 : -40), ay); c.lineTo(ax, ay); c.stroke();
-      c.fillStyle = "rgba(10,16,30,.9)"; c.strokeStyle = hexA(p.color, .9);
-      c.beginPath(); c.roundRect(bx, by, bw, bh, 28); c.fill(); c.stroke();
-      c.textAlign = "left"; c.textBaseline = "alphabetic";
-      c.fillStyle = p.color; c.font = `600 30px ${FONT}`; c.fillText(title, bx + 35, by + 50);
-      c.fillStyle = "#f2f5fb"; c.font = `800 64px ${FONT}`; c.fillText(text, bx + 35, by + 112);
-    });
-  }
+  // match nodes to slots in the same cyclic order (no crossings), picking the rotation with the shortest leaders
+  const angle = (x, y) => Math.atan2(y - oy, x - ox);
+  const ps = [...picked].sort((a, b) => angle(X(a), Y(a)) - angle(X(b), Y(b)));
+  const ss = SLOTS.slice(0, ps.length).map(t => [ecx + erx * Math.cos(t), ecy + ery * Math.sin(t)])
+    .sort((a, b) => angle(...a) - angle(...b));
+  const cost = k => d3.sum(ps, (p, i) => Math.hypot(ss[(i + k) % ss.length][0] - X(p), ss[(i + k) % ss.length][1] - Y(p)));
+  const best = d3.minIndex(d3.range(ss.length), cost);
+  ps.forEach((p, i) => {
+    const [sx, sy0] = ss[(i + best) % ss.length];
+    const title = p.c.replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase(), text = p.l;
+    c.font = `800 64px ${FONT}`; const tw = c.measureText(text).width;
+    c.font = `600 30px ${FONT}`; const sw = c.measureText(title).width;
+    const bw = Math.max(tw, sw) + 70, bh = BOX_H;
+    const bx = Math.min(Math.max(sx - bw / 2, MARGIN / 2), W - MARGIN / 2 - bw);
+    const by = Math.min(Math.max(sy0 - bh / 2, MARGIN / 2), H - STRIP - bh - 20);
+    const lx = Math.min(Math.max(X(p), bx), bx + bw), ly = Math.min(Math.max(Y(p), by), by + bh);  // nearest box point
+    const ang = Math.atan2(ly - Y(p), lx - X(p)), rr = R(p) + 8;
+    c.strokeStyle = hexA(p.color, .8); c.lineWidth = 4;
+    c.beginPath(); c.moveTo(X(p) + Math.cos(ang) * rr, Y(p) + Math.sin(ang) * rr); c.lineTo(lx, ly); c.stroke();
+    c.fillStyle = "rgba(12,18,32,.9)"; c.strokeStyle = hexA(p.color, .85);
+    c.beginPath(); c.roundRect(bx, by, bw, bh, 28); c.fill(); c.stroke();
+    c.textAlign = "left"; c.textBaseline = "alphabetic";
+    c.fillStyle = p.color; c.font = `600 30px ${FONT}`; c.fillText(title, bx + 35, by + 50);
+    c.fillStyle = "#eef1f7"; c.font = `800 64px ${FONT}`; c.fillText(text, bx + 35, by + 112);
+  });
 
   // bottom strip: title + legend
   const sy = H - STRIP;
