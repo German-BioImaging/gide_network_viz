@@ -11,6 +11,26 @@ SDO = Namespace("http://schema.org/")
 DWC = Namespace("http://rs.tdwg.org/dwc/terms/")
 g = Graph().parse("gide_metadata_combined.ttl")
 
+# SSBD:database names taxa https://www.ncbi.nlm.nih.gov/datasets/taxonomy/<id>; everyone else uses obo:NCBITaxon_<id>
+NCBI_WEB = "https://www.ncbi.nlm.nih.gov/datasets/taxonomy/"
+
+
+def harmonise_taxa():
+    to_obo = lambda n: URIRef("http://purl.obolibrary.org/obo/NCBITaxon_" + str(n)[len(NCBI_WEB):].strip("/")) \
+        if isinstance(n, URIRef) and str(n).startswith(NCBI_WEB) else n
+    for s, p, o in list(g):
+        s2, o2 = to_obo(s), to_obo(o)
+        if (s2, o2) == (s, o):
+            continue
+        g.remove((s, p, o))
+        if s2 != s and isinstance(o, Literal) and g.value(s2, p) is not None:
+            continue  # keep the obo node's own name (e.g. "Mus musculus" over "M. muculus")
+        g.add((s2, p, o2))
+    assert not any(str(n).startswith(NCBI_WEB) for t in g for n in t), "NCBI web taxon IRIs left"
+
+
+harmonise_taxa()
+
 
 def local(u):
     return str(u).rstrip("/").rsplit("/", 1)[-1].rsplit("#", 1)[-1]
@@ -30,11 +50,11 @@ def node_class(n):
 
 def label(n):
     if isinstance(n, Literal):
-        return str(n)
+        return str(n).strip()
     for p in (SDO.name, DWC.scientificName, SDO.identifier):
-        v = g.value(n, p)
-        if v is not None:
-            return str(v)
+        vs = [str(v).strip() for v in g.objects(n, p)]
+        if vs:
+            return max(vs, key=len)  # merged taxa can carry several names; the longest beats abbreviations ("M. muculus")
     return local(n) if isinstance(n, URIRef) else "_"
 
 
