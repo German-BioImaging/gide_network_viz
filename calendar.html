@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GIDE Calendar Print</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+  body { margin: 0; background: #070b14; display: grid; place-items: center; min-height: 100vh; }
+  canvas { width: min(100vw, calc(100vh * 4961 / 3508)); height: auto; display: block; }
+  button { position: fixed; top: 10px; right: 10px; font: 600 13px Inter, system-ui, sans-serif; padding: 6px 10px;
+           background: #1b2436; color: #e8edf7; border: 1px solid #34405a; border-radius: 6px; cursor: pointer; }
+  @media print { button { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="c" width="4961" height="3508"></canvas>
+<button id="png">Download PNG (A3, 300 dpi)</button>
+<script>
+// Single print image (A3 landscape, 300 dpi) of the SSBD-merged view: dark background, glow, a few labelled nodes.
+// Positions are the same pre-computed ones the viewer uses (graph_ssbd.json + positions_ssbd.json).
+const W = 4961, H = 3508, MARGIN = 160, STRIP = 300;  // px; STRIP = title/legend band at the bottom
+const BG = "#070b14";
+const FONT = "Inter, system-ui, sans-serif";
+// brighter tints of the viewer's classes, chosen for a dark background and away from the logo hues
+const LEGEND = [["Person", "#7aa6ff"], ["Keyword", "#c39bff"], ["Organization", "#9fb3c8"], ["Taxon", "#ffe066"],
+  ["ScholarlyArticle", "#ff8fd8"], ["Dataset", "#6ee7d8"], ["Grant", "#b4a7d6"], ["DefinedTerm", "#ffd6a5"]];
+const OTHERS = "#5c6676";
+const PUB_COLORS = { "https://idr.openmicroscopy.org/": "#ff3b30", "https://ssbd.riken.jp/": "#ffa31a",
+  "https://www.ebi.ac.uk/bioimage-archive/": "#9be15d" };
+// which nodes get a callout: [rule, ...]; top = most links within that class
+const HIGHLIGHTS = [
+  { top: 2, c: "Taxon" },
+  { top: 2, c: "DefinedTerm" },
+  { label: "Maddy Parsons", c: "Person" },
+  { label: "brain", c: "Keyword" },
+];
+const R_MIN = 1.5, R_MAX = 12, K = 8, INSIDE_X = 2, R_PUB = 36;  // same as the viewer (graph units)
+const NODE_SCALE = 1.4;  // print enlargement of node radii, so the smallest dots still show on paper
+
+const canvas = document.getElementById("c"), c = canvas.getContext("2d");
+const colorOf = new Map(LEGEND);
+
+Promise.all([fetch("graph_ssbd.json").then(r => r.json()), fetch("positions_ssbd.json").then(r => r.json()),
+             document.fonts.load(`800 40px Inter`).catch(() => {})]).then(([g, pos]) => draw(g, pos));
+
+function draw(g, pos) {
+  const nodes = g.nodes;
+  for (const n of nodes) {
+    [n.x, n.y] = pos.pos[n.id];
+    n.in = n.pub === undefined && n.p.length !== 1;
+    const base = R_MIN + (R_MAX - R_MIN) * Math.tanh(n.k / K);
+    n.r = n.pub !== undefined ? R_PUB : n.in ? INSIDE_X * base : base;
+    n.color = n.pub !== undefined ? (PUB_COLORS[n.u] || "#ccc") : (colorOf.get(n.c) || OTHERS);
+  }
+  const links = g.links.map(([s, t]) => [nodes[s], nodes[t]]);
+
+  // fit graph into the area above the strip
+  const xs = d3.extent(nodes, n => n.x), ys = d3.extent(nodes, n => n.y);
+  const s = Math.min((W - 2 * MARGIN) / (xs[1] - xs[0]), (H - 2 * MARGIN - STRIP) / (ys[1] - ys[0]));
+  const ox = W / 2 - s * (xs[0] + xs[1]) / 2, oy = (H - STRIP) / 2 - s * (ys[0] + ys[1]) / 2;
+  const X = n => ox + s * n.x, Y = n => oy + s * n.y, R = n => Math.max(1.2, n.r * s * NODE_SCALE);
+
+  // background + vignette
+  c.fillStyle = BG; c.fillRect(0, 0, W, H);
+  const vg = c.createRadialGradient(W / 2, (H - STRIP) / 2, 0, W / 2, (H - STRIP) / 2, W * .6);
+  vg.addColorStop(0, "#14203a"); vg.addColorStop(1, "rgba(7,11,20,0)");
+  c.fillStyle = vg; c.fillRect(0, 0, W, H);
+
+  // edges: additive blending makes dense bundles glow
+  c.globalCompositeOperation = "lighter"; c.lineWidth = 1.1;
+  for (const [inner, alpha] of [[false, .025], [true, .06]]) {
+    c.strokeStyle = `rgba(150,180,255,${alpha})`; c.beginPath();
+    for (const [a, b] of links) {
+      const isIn = a.in || b.in || a.pub !== undefined || b.pub !== undefined;
+      if (isIn !== inner) continue;
+      c.moveTo(X(a), Y(a)); c.lineTo(X(b), Y(b));
+    }
+    c.stroke();
+  }
+
+  // highlighted nodes: their edges in their own colour
+  const picked = [];
+  for (const h of HIGHLIGHTS) {
+    const cands = nodes.filter(n => n.c === h.c && (!h.label || n.l === h.label)).sort((a, b) => b.k - a.k);
+    if (!cands.length) console.warn("highlight not found", h);
+    picked.push(...cands.slice(0, h.top || 1));
+  }
+  const pickedSet = new Set(picked);
+  c.lineWidth = 2;
+  for (const p of picked) {
+    c.strokeStyle = hexA(p.color, .22); c.beginPath();
+    for (const [a, b] of links) if (a === p || b === p) { c.moveTo(X(a), Y(a)); c.lineTo(X(b), Y(b)); }
+    c.stroke();
+  }
+
+  // outside nodes: faint, batched by colour
+  c.globalAlpha = .5;
+  for (const [col, ns] of d3.groups(nodes.filter(n => n.pub === undefined && !n.in), n => n.color)) {
+    c.fillStyle = col; c.beginPath();
+    for (const n of ns) { c.moveTo(X(n) + R(n), Y(n)); c.arc(X(n), Y(n), R(n), 0, 2 * Math.PI); }
+    c.fill();
+  }
+  c.globalAlpha = 1; c.globalCompositeOperation = "source-over";
+
+  // polygon outline
+  c.setLineDash([18, 14]); c.strokeStyle = "rgba(200,215,255,.35)"; c.lineWidth = 3;
+  c.beginPath(); pos.polygon.forEach(([x, y], i) => c[i ? "lineTo" : "moveTo"](ox + s * x, oy + s * y)); c.closePath(); c.stroke();
+  c.setLineDash([]);
+
+  // inside (shared) nodes: glowing
+  for (const n of nodes.filter(n => n.in).sort((a, b) => a.r - b.r)) {
+    c.shadowColor = n.color; c.shadowBlur = R(n) * 1.5; c.fillStyle = n.color;
+    c.beginPath(); c.arc(X(n), Y(n), R(n), 0, 2 * Math.PI); c.fill();
+  }
+  c.shadowBlur = 0;
+
+  // publishers
+  const pubs = nodes.filter(n => n.pub !== undefined);
+  for (const n of pubs) {
+    const r = R_PUB * s * NODE_SCALE * 1.2;
+    const glow = c.createRadialGradient(X(n), Y(n), 0, X(n), Y(n), r * 4);
+    glow.addColorStop(0, hexA(n.color, .55)); glow.addColorStop(1, hexA(n.color, 0));
+    c.fillStyle = glow; c.beginPath(); c.arc(X(n), Y(n), r * 4, 0, 2 * Math.PI); c.fill();
+    c.fillStyle = n.color; c.strokeStyle = "#fff"; c.lineWidth = 6;
+    c.beginPath(); c.arc(X(n), Y(n), r, 0, 2 * Math.PI); c.fill(); c.stroke();
+    // title outside the polygon: above top corners, below bottom ones
+    const up = n.y < 0, fs = 92;
+    c.font = `800 ${fs}px ${FONT}`; c.textAlign = "center"; c.textBaseline = up ? "bottom" : "top";
+    c.lineJoin = "round"; c.strokeStyle = BG; c.lineWidth = 18; c.fillStyle = n.color;
+    const ty = Y(n) + (up ? -r - 30 : r + 30);
+    c.strokeText(n.l, X(n), ty); c.fillText(n.l, X(n), ty);
+  }
+
+  // callouts: two stacked columns in the empty top corners, left/right by the node's side; leader lines to the rings
+  const BOX_H = 140, GAP = 40, COL_X = .30;  // COL_X: column inner edge, as a fraction of the width from each side
+  for (const p of picked) { c.strokeStyle = "#fff"; c.lineWidth = 5; c.beginPath(); c.arc(X(p), Y(p), R(p) + 8, 0, 2 * Math.PI); c.stroke(); }
+  for (const left of [true, false]) {
+    const byX = [...picked].sort((a, b) => X(a) - X(b)), half = Math.ceil(byX.length / 2);  // balance the two columns
+    const side = (left ? byX.slice(0, half) : byX.slice(half)).sort((a, b) => Y(a) - Y(b));
+    side.forEach((p, i) => {
+      const title = p.c.replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase(), text = p.l;
+      c.font = `800 64px ${FONT}`; const tw = c.measureText(text).width;
+      c.font = `600 30px ${FONT}`; const sw = c.measureText(title).width;
+      const bw = Math.max(tw, sw) + 70, bh = BOX_H;
+      const bx = left ? W * COL_X - bw : W * (1 - COL_X), by = MARGIN + i * (bh + GAP);
+      const ax = left ? bx + bw : bx, ay = by + bh / 2;  // anchor on the inner edge
+      const ang = Math.atan2(ay - Y(p), ax - X(p)), rr = R(p) + 8;
+      c.strokeStyle = hexA(p.color, .85); c.lineWidth = 4;
+      c.beginPath(); c.moveTo(X(p) + Math.cos(ang) * rr, Y(p) + Math.sin(ang) * rr);
+      c.lineTo(ax + (left ? 40 : -40), ay); c.lineTo(ax, ay); c.stroke();
+      c.fillStyle = "rgba(10,16,30,.9)"; c.strokeStyle = hexA(p.color, .9);
+      c.beginPath(); c.roundRect(bx, by, bw, bh, 28); c.fill(); c.stroke();
+      c.textAlign = "left"; c.textBaseline = "alphabetic";
+      c.fillStyle = p.color; c.font = `600 30px ${FONT}`; c.fillText(title, bx + 35, by + 50);
+      c.fillStyle = "#f2f5fb"; c.font = `800 64px ${FONT}`; c.fillText(text, bx + 35, by + 112);
+    });
+  }
+
+  // bottom strip: title + legend
+  const sy = H - STRIP;
+  c.fillStyle = "rgba(255,255,255,.08)"; c.fillRect(MARGIN, sy, W - 2 * MARGIN, 2);
+  c.textAlign = "left"; c.textBaseline = "alphabetic";
+  c.fillStyle = "#f2f5fb"; c.font = `800 76px ${FONT}`;
+  c.fillText("One network of bioimage metadata", MARGIN, sy + 120);
+  c.fillStyle = "#9aa6bd"; c.font = `400 40px ${FONT}`;
+  c.fillText(`${nodes.length.toLocaleString("en")} entities · ${links.length.toLocaleString("en")} links · inside the triangle: shared by two or more repositories`, MARGIN, sy + 190);
+  let lx = W - MARGIN;
+  c.font = `600 36px ${FONT}`; c.textAlign = "right";
+  for (const [name, col] of [...LEGEND].reverse()) {
+    const label = name.replace(/([a-z])([A-Z])/g, "$1 $2");
+    c.fillStyle = "#c9d2e3"; c.fillText(label, lx, sy + 160);
+    lx -= c.measureText(label).width + 24;
+    c.fillStyle = col; c.beginPath(); c.arc(lx, sy + 147, 14, 0, 2 * Math.PI); c.fill();
+    lx -= 70;
+  }
+  document.title = "GIDE Calendar Print";
+  window.READY = true;  // for headless checks
+}
+
+function hexA(hex, a) {
+  const { r, g, b } = d3.color(hex).rgb();
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+document.getElementById("png").onclick = () =>
+  canvas.toBlob(b => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = "gide_calendar_A3.png"; a.click(); });
+</script>
+</body>
+</html>

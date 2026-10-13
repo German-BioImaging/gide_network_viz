@@ -22,6 +22,7 @@ python3 -m http.server          # then open http://localhost:8000
 - `build_graph.py`: RDF → graph + per-class counts. Change it to change *what* is in the graph.
 - `layout.mjs`: the force layout, run once. Change it to change *where* nodes go.
 - `index.html`: static d3 v7 canvas viewer. Change it to change *how* the graph looks.
+- `calendar.html`: one print image (A3 landscape, 300 dpi, dark) of the SSBD-merged view with a few labelled nodes; "Download PNG" saves it.
 - `graph*.json`, `positions*.json`, `class_counts*.csv`: generated files, one set per view. Don't edit them by hand.
 
 ## Parameters
@@ -34,6 +35,8 @@ parameters:
   input_ttl: gide_metadata_combined.ttl
   anchor_predicate: schema:publisher        # its objects are the polygon corners
   views: {"": all publishers (4), _ssbd: ssbd.riken.jp/database + /repository -> one node https://ssbd.riken.jp/ "SSBD" (3)}  # merge_ssbd()
+  taxon_iri_normalization: ncbi.nlm.nih.gov/datasets/taxonomy/<id> -> obo:NCBITaxon_<id> (SSBD:database used the former)  # harmonise_taxa()
+  multi_valued_label: longest value wins (e.g. "Mus musculus" over "M. muculus"); labels are whitespace-stripped
   node_rule: every IRI / blank node         # literals are only used as labels...
   literal_nodes: [schema:keywords]          # ...except these, which become nodes
   keyword_normalization: strip + lowercase  # merges case variants
@@ -83,6 +86,23 @@ parameters:
   default_view: whole graph centred and fitted to the window; back via "Reset view", key 0/Home, or double-click empty space
   class_toggle: hide/show only, never re-lays out; "All" checkbox shows/hides every class (half-checked when mixed)
   interactive: inside nodes + publishers only (hover tooltip + edge highlight, double-click opens IRI); zoom/pan everywhere
+
+  # --- calendar print (calendar.html) ---
+  calendar:
+    view: _ssbd                             # triangle
+    size_px: [4961, 3508]                   # A3 landscape, 300 dpi; MARGIN 160, bottom STRIP 300 for title + legend
+    background: "#070b14" + radial vignette
+    palette: brighter tints for dark background (LEGEND in calendar.html); publishers in logo colours
+    edges: additive ("lighter") blending, alpha 0.025 outside / 0.06 inside
+    outside_nodes: alpha 0.5
+    inside_nodes: glow (shadowBlur 1.5 x radius)
+    node_scale: 2.2                         # NODE_SCALE: radii enlarged for print
+    highlights:                             # HIGHLIGHTS: callout pill + white ring + edges in its colour
+      - top 2 Taxon by links
+      - top 2 DefinedTerm by links
+      - Person "Maddy Parsons"
+      - Keyword "brain"
+    title: "One network of bioimage metadata"
 
   # --- output ---
   export_png_scale: 3
