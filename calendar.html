@@ -7,16 +7,17 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 <style>
-  body { margin: 0; background: #f3ede2; display: grid; place-items: center; min-height: 100vh; }
-  canvas { width: min(100vw, calc(100vh * 4961 / 3508)); height: auto; display: block; }
+  body { margin: 0; background: #f3ede2; }
+  #stage { position: fixed; inset: 0; overflow: hidden; display: grid; place-items: center; }
+  canvas { width: min(100vw, calc(100vh * 4961 / 3508)); height: auto; display: block; transform-origin: 0 0; }
   button { position: fixed; top: 10px; right: 10px; font: 600 13px Inter, system-ui, sans-serif; padding: 6px 10px;
            background: #fbf8f2; color: #2b2620; border: 1px solid #c9bfae; border-radius: 6px; cursor: pointer; }
   @media print { button { display: none; } }
 </style>
 </head>
 <body>
-<canvas id="c" width="4961" height="3508"></canvas>
-<button id="png" title="Click any node to add or remove its label">Export PNG (A3, 300 dpi)</button>
+<div id="stage"><canvas id="c" width="4961" height="3508"></canvas></div>
+<button id="png" title="Click a node to toggle its label · scroll to zoom, drag to pan · double-click or 0 to reset">Export PNG (A3, 300 dpi)</button>
 <script>
 // Single print image (A3 landscape, 300 dpi) of the SSBD-merged view: sober light beige theme, a few labelled nodes.
 // Positions are the same pre-computed ones the viewer uses (graph_ssbd.json + positions_ssbd.json).
@@ -27,6 +28,8 @@ const FONT = "Inter, system-ui, sans-serif";
 const LEGEND = [["Person", "#7d98b3"], ["Keyword", "#8a6bb0"], ["Organization", "#7d8a96"], ["Taxon", "#c9a227"],
   ["ScholarlyArticle", "#c06c9a"], ["Dataset", "#4f9a90"], ["Grant", "#9c8fb8"], ["DefinedTerm", "#2e4a8c"]];
 const OTHERS = "#b9b0a3";
+const LOGOS = { "https://idr.openmicroscopy.org/": "logos/idr.svg", "https://ssbd.riken.jp/": "logos/ssbd.png",
+  "https://www.ebi.ac.uk/bioimage-archive/": "logos/bia.png" }, LOGO_IMG = {};
 const PUB_COLORS = { "https://idr.openmicroscopy.org/": "#ff3b30", "https://ssbd.riken.jp/": "#ffa31a",
   "https://www.ebi.ac.uk/bioimage-archive/": "#9be15d" };
 // which nodes get a callout: [rule, ...]; top = most links within that class
@@ -44,7 +47,14 @@ let c = main;  // drawing target: the cached base layer while building it, then 
 const colorOf = new Map(LEGEND);
 
 Promise.all([fetch("graph_ssbd.json").then(r => r.json()), fetch("positions_ssbd.json").then(r => r.json()),
-             document.fonts.load(`800 40px Inter`).catch(() => {})]).then(([g, pos]) => { setup(g, pos); render(); });
+             document.fonts.load(`800 40px Inter`).catch(() => {}),
+             ...Object.entries(LOGOS).map(([u, src]) => loadImage(src).then(img => LOGO_IMG[u] = img).catch(() => {}))])
+  .then(([g, pos]) => { setup(g, pos); render(); });
+
+// repository logos, served next to this page (same origin, so the canvas stays exportable)
+function loadImage(src) {
+  return new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = fail; i.src = src; });
+}
 
 // The full network (edges, nodes, titles, legend) is drawn once into an offscreen base layer.
 // A click only repaints base + labels, so toggling a label is fast.
@@ -60,6 +70,16 @@ function target(ev) {
   return n && Math.hypot(X(n) - x, Y(n) - y) <= R(n) + 6 * k ? n : null;
 }
 canvas.onmousemove = ev => { canvas.style.cursor = target(ev) ? "pointer" : "default"; };
+// zoom/pan only magnifies the view (CSS transform) to make clicking easier; the image itself never changes
+const stage = document.getElementById("stage");
+const viewZoom = d3.zoom().scaleExtent([1, 15]).on("zoom", ({ transform: t }) => {
+  // stage-space zoom applied to a centred canvas: translate so canvas point q lands at t.k * (offset + q) + t.x
+  const ox0 = canvas.offsetLeft, oy0 = canvas.offsetTop;
+  canvas.style.transform = `translate(${t.x + (t.k - 1) * ox0}px, ${t.y + (t.k - 1) * oy0}px) scale(${t.k})`;
+});
+const resetView = () => d3.select(stage).transition().duration(400).call(viewZoom.transform, d3.zoomIdentity);
+d3.select(stage).call(viewZoom).on("dblclick.zoom", null).on("dblclick", ev => { if (!target(ev)) resetView(); });
+addEventListener("keydown", e => { if (e.key === "0" || e.key === "Home") resetView(); });
 canvas.onclick = ev => {
   const n = target(ev);
   if (!n) return;
@@ -138,9 +158,16 @@ function setup(g, pos) {
   // publishers
   const pubs = nodes.filter(n => n.pub !== undefined);
   for (const n of pubs) {
-    const r = R_PUB * s * NODE_SCALE * 1.2;
-    c.fillStyle = n.color; c.strokeStyle = BG; c.lineWidth = 6;
-    c.beginPath(); c.arc(X(n), Y(n), r, 0, 2 * Math.PI); c.fill(); c.stroke();
+    const img = LOGO_IMG[n.u], r = R_PUB * s * NODE_SCALE * (img ? 1.6 : 1.2);
+    if (img) {  // white disc with the logo, ringed in the logo colour
+      c.fillStyle = "#fff"; c.strokeStyle = n.color; c.lineWidth = 10;
+      c.beginPath(); c.arc(X(n), Y(n), r, 0, 2 * Math.PI); c.fill(); c.stroke();
+      const box = r * 1.25, f = box / Math.max(img.width, img.height), w = img.width * f, h = img.height * f;
+      c.drawImage(img, X(n) - w / 2, Y(n) - h / 2, w, h);
+    } else {
+      c.fillStyle = n.color; c.strokeStyle = BG; c.lineWidth = 6;
+      c.beginPath(); c.arc(X(n), Y(n), r, 0, 2 * Math.PI); c.fill(); c.stroke();
+    }
     // title outside the polygon: above top corners, below bottom ones
     const up = n.y < 0, fs = 92;
     c.font = `800 ${fs}px ${FONT}`; c.textAlign = "center"; c.textBaseline = up ? "bottom" : "top";
@@ -154,7 +181,7 @@ function setup(g, pos) {
   c.fillStyle = "rgba(70,60,50,.15)"; c.fillRect(MARGIN, sy, W - 2 * MARGIN, 2);
   c.textAlign = "left"; c.textBaseline = "alphabetic";
   c.fillStyle = INK; c.font = `800 76px ${FONT}`;
-  c.fillText("One network of bioimage metadata", MARGIN, sy + 120);
+  c.fillText("Harmonized bioimage metadata via FoundingGIDE", MARGIN, sy + 120);
   c.fillStyle = MUTED; c.font = `400 40px ${FONT}`;
   c.fillText(`Metadata nodes in the FoundingGIDE project · ${nodes.length.toLocaleString("en")} entities · ${links.length.toLocaleString("en")} links · inside the triangle: shared by two or more repositories`, MARGIN, sy + 190);
   let lx = W - MARGIN;
@@ -198,7 +225,8 @@ function render() {
   const best = ss.length ? d3.minIndex(d3.range(ss.length), cost) : 0;
   ps.forEach((p, i) => {
     const [sx, sy0] = ss[(i + best) % ss.length];
-    const title = p.c.replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase() + (curie(p) ? `  ·  ${curie(p)}` : ""), text = p.l;
+    const title = p.c.replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase() + (curie(p) ? `  ·  ${curie(p)}` : ""),
+      text = p.c === "Keyword" ? `"${p.l}"` : p.l;  // keywords are plain strings, not identified terms
     c.font = `800 64px ${FONT}`; const tw = c.measureText(text).width;
     c.font = `600 30px ${FONT}`; const sw = c.measureText(title).width;
     const bw = Math.max(tw, sw) + 70, bh = BOX_H;
