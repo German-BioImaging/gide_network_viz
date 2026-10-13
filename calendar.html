@@ -34,10 +34,14 @@ const PUB_COLORS = { "https://idr.openmicroscopy.org/": "#ff3b30", "https://ssbd
   "https://www.ebi.ac.uk/bioimage-archive/": "#9be15d" };
 // which nodes get a callout: [rule, ...]; top = most links within that class
 const HIGHLIGHTS = [
-  { top: 2, c: "Taxon" },
-  { top: 2, c: "DefinedTerm" },
-  { label: "zebrafish", c: "Keyword" },
-  { label: "morphogenesis", c: "Keyword" },
+  { label: "Homo sapiens", c: "Taxon" },
+  { label: "Schizosaccharomyces pombe", c: "Taxon" },
+  { label: "Drosophila melanogaster", c: "Taxon" },
+  { label: "bright-field microscopy", c: "DefinedTerm" },
+  { label: "confocal microscopy", c: "DefinedTerm" },
+  { label: "apoptosis", c: "Keyword" },
+  { label: "lung", c: "Keyword" },
+  { label: "artificial intelligence", c: "Keyword" },
 ];
 const R_MIN = 1.5, R_MAX = 12, K = 8, INSIDE_X = 2, R_PUB = 36;  // same as the viewer (graph units)
 const NODE_SCALE = 1.4;  // print enlargement of node radii, so the smallest dots still show on paper
@@ -225,11 +229,12 @@ function render() {
   const best = ss.length ? d3.minIndex(d3.range(ss.length), cost) : 0;
   ps.forEach((p, i) => {
     const [sx, sy0] = ss[(i + best) % ss.length];
-    const title = p.c.replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase() + (curie(p) ? `  ·  ${curie(p)}` : ""),
+    const title = p.c.replace(/([a-z])([A-Z])/g, "$1 $2").toUpperCase(), id = curie(p),
       text = p.c === "Keyword" ? `"${p.l}"` : p.l;  // keywords are plain strings, not identified terms
     c.font = `800 64px ${FONT}`; const tw = c.measureText(text).width;
+    c.font = `400 64px ${FONT}`; const iw = id ? c.measureText(id).width : 0;
     c.font = `600 30px ${FONT}`; const sw = c.measureText(title).width;
-    const bw = Math.max(tw, sw) + 70, bh = BOX_H;
+    const bw = Math.max(tw, iw, sw) + 70, bh = BOX_H + (id ? 76 : 0);  // CURIE gets its own line, same size as the label
     const bx = Math.min(Math.max(sx - bw / 2, MARGIN / 2), W - MARGIN / 2 - bw);
     const by = Math.min(Math.max(sy0 - bh / 2, MARGIN / 2), H - STRIP - bh - 20);
     const lx = Math.min(Math.max(X(p), bx), bx + bw), ly = Math.min(Math.max(Y(p), by), by + bh);  // nearest box point
@@ -242,6 +247,7 @@ function render() {
     c.textAlign = "left"; c.textBaseline = "alphabetic";
     c.fillStyle = p.color; c.font = `600 30px ${FONT}`; c.fillText(title, bx + 35, by + 50);
     c.fillStyle = INK; c.font = `800 64px ${FONT}`; c.fillText(text, bx + 35, by + 112);
+    if (id) { c.fillStyle = p.color; c.font = `400 64px ${FONT}`; c.fillText(id, bx + 35, by + 188); }
   });
   window.READY = true;  // for headless checks
 }

@@ -97,11 +97,15 @@ parameters:
     outside_nodes: alpha 0.45
     inside_nodes: opaque with thin beige outline; no glow anywhere
     node_scale: 1.4                         # NODE_SCALE: radii enlarged for print
-    highlights:                             # HIGHLIGHTS: callout pill (CLASS · CURIE, e.g. NCBITaxon:9606; keywords have none and are shown in quotes, "zebrafish") + ring and leader line in its class colour + its edges; click nodes/boxes to toggle; scroll/drag zooms the view only (1-15x, double-click empty space or 0 resets), export is unaffected
-      - top 2 Taxon by links
-      - top 2 DefinedTerm by links
-      - Keyword "zebrafish"
-      - Keyword "morphogenesis"
+    highlights:                             # HIGHLIGHTS: callout pill (CLASS, label, then the CURIE on its own line at label size, e.g. NCBITaxon:9606; keywords have none and are shown in quotes, "zebrafish") + ring and leader line in its class colour + its edges; click nodes/boxes to toggle; scroll/drag zooms the view only (1-15x, double-click empty space or 0 resets), export is unaffected
+      - Taxon "Homo sapiens"
+      - Taxon "Schizosaccharomyces pombe"
+      - Taxon "Drosophila melanogaster"
+      - DefinedTerm "bright-field microscopy"
+      - DefinedTerm "confocal microscopy"
+      - Keyword "apoptosis"
+      - Keyword "lung"
+      - Keyword "artificial intelligence"
     callout_slots: ellipse around the graph at [-155, -118, 175, 90, 5, -62, -25] deg; matched to nodes in cyclic order, shortest leaders
     publisher_nodes: white disc with the repository logo (logos/: idr.svg logomark, bia.png icon crop, ssbd.png site favicon 64px), ringed in the logo colour
     title: "Harmonized bioimage metadata via FoundingGIDE"
